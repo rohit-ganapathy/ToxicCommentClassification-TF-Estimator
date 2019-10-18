@@ -109,7 +109,7 @@ def main(_):
             print("writing training record no {}".format(index))
 
         text = train_data["comment_text"][index]
-        label = [train_data[column][index] for column in data.columns[-6:]]
+        label = [train_data[column][index] for column in train_data.columns[-6:]]
         
         tf_example = create_tf_example(text, vocab, FLAGS.max_seq_len,label)
         writer_train.write(tf_example)  
@@ -120,8 +120,8 @@ def main(_):
             print("writing test record no {}".format(index))
 
         text = test_data["comment_text"][index]
-        label = [test_data[column][index] for column in data.columns[-6:]]
-        
+        label = [test_data[column][index] for column in test_data.columns[-6:]]
+        print(label)       
         tf_example = create_tf_example(text, vocab, FLAGS.max_seq_len,label)
         writer_test.write(tf_example)    
 

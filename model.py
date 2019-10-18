@@ -5,11 +5,12 @@ import tensorflow as tf
 from tensorflow.keras import Input
 from tensorflow.keras.layers import Embedding, Bidirectional, LSTM, GlobalAveragePooling1D, Dense
 from tensorflow.keras.losses import binary_crossentropy
+from tensorflow.keras.layers import Add
 
 from typing import Dict, Any, Callable, Tuple
 import numpy as np
 
-
+tf.logging.set_verbosity(tf.logging.INFO)
 
 flags = tf.flags
 
@@ -53,7 +54,7 @@ def load_embedding_matrix(params):
         try:
             embedding_matrix.append(np.array(glove_embeds[word]))
         except:
-            embedding_matrix.append(np.random.randn(embedding_dimension,seed=params["seed"]))
+            embedding_matrix.append(np.random.randn(embedding_dimension))
 
     
     return np.array(embedding_matrix).shape
@@ -73,6 +74,19 @@ def data_input_fn(params,is_training=True) -> Callable[[], Tuple]:
     """
     
     _cpu_core_count = psutil.cpu_count(logical=False)
+
+
+    def decode_record(record):
+
+        name_to_features = {
+
+            "input_ids": tf.FixedLenFeature([256], tf.int64),
+            "label" : tf.FixedLenFeature([6], tf.int64)
+                }
+
+        example = tf.parse_single_example(record, name_to_features)
+
+        return example
     
     def _input_fn() -> Tuple:
         
@@ -88,7 +102,8 @@ def data_input_fn(params,is_training=True) -> Callable[[], Tuple]:
             data_path = params["validation_records_path"]
 
         dataset = tf.data.TFRecordDataset([data_path])
-    
+        dataset = dataset.map(decode_record)
+
         if is_training:
             dataset = dataset.shuffle(buffer_size=10000)
             dataset = dataset.repeat(params["epochs"]) # Infinite iterations: let experiment determine num_epochs
@@ -114,7 +129,10 @@ def model(features: Dict[str, tf.Tensor], mode: tf.estimator.ModeKeys, params: D
     
     glove_weights_initializer = tf.constant_initializer(load_embedding_matrix(params))
 
-    embeddings = Embedding(params["vocab_size"], params["embed_dimension"], input_length = 256,
+    print("here are the features")
+    print(features)
+
+    embeddings = Embedding(params["vocab_size"], params["embed_dims"], input_length = 256,
                                  embeddings_initializer = glove_weights_initializer)(features["input_ids"])
     
     bidirectional_outputs = Bidirectional(LSTM(128, return_sequences=True))(embeddings)
@@ -125,8 +143,7 @@ def model(features: Dict[str, tf.Tensor], mode: tf.estimator.ModeKeys, params: D
 
     return logits
 
-def custom_model_fn(features: Dict[str, tf.Tensor], 
-                    labels: tf.Tensor, 
+def custom_model_fn(features: Dict[str, tf.Tensor],  
                     mode: tf.estimator.ModeKeys, 
                     params: Dict[str, Any]=None) -> tf.estimator.EstimatorSpec:
     
@@ -142,11 +159,12 @@ def custom_model_fn(features: Dict[str, tf.Tensor],
     """
 
     model_output = model(features, mode, params)
+    print("eueue")
     
     # Get prediction of model output
     
     predictions = {
-        'classes': tf.map_fn(lambda x: tf.cast(x+tf.constant(0.5,shape = tf.shape(x)), tf.int32),model_output),
+            'classes': model_output,
         'probabilities': model_output
     }
     
@@ -161,19 +179,21 @@ def custom_model_fn(features: Dict[str, tf.Tensor],
 
         return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, export_outputs=export_outputs)
 
-    loss = binary_crossentropy(
-        y_true = tf.cast(labels, tf.int32),
+    batch_loss = binary_crossentropy(
+        y_true = tf.cast(features["label"], tf.float32),
         y_pred = model_output
     )
 
+    loss = tf.math.reduce_sum(batch_loss)
+
     # Configure the Training Op (for TRAIN mode)
     if mode == tf.contrib.learn.ModeKeys.TRAIN:
-        
+        print("fhfhfhf")
         train_op = tf.contrib.layers.optimize_loss(
             loss=loss,
             global_step=tf.contrib.framework.get_global_step(),
-            learning_rate=params.learning_rate,
-            optimizer=tf.train.AdamOptimizer(0.001)
+            learning_rate=params["learning_rate"],
+            optimizer=tf.train.AdamOptimizer(params["learning_rate"])
         )
         
         # Return an EstimatorSpec object for training
@@ -182,7 +202,7 @@ def custom_model_fn(features: Dict[str, tf.Tensor],
    
     eval_metric = {
         'accuracy': tf.metrics.accuracy(
-            labels=tf.cast(labels, tf.int32),
+            labels=tf.cast(features["label"], tf.int32),
             predictions=model_output,
             name='accuracy'
         )
@@ -204,31 +224,33 @@ def main(_):
         "glove_path" : FLAGS.glove_path,
         "embed_dims" : FLAGS.embed_dims,
         "vocab_path" : FLAGS.vocab_path,
-        "seed" : 420    
+        "vocab_size" : 30004,
+        "learning_rate" : 0.001
+
 
     }
 
     
-    n_training_samples = 0
+   # n_training_samples = 0
     
-    for record in tf.python_io.tf_record_iterator(params["train_records_path"]):
-        n_training_samples+= 1
+    #for record in tf.python_io.tf_record_iterator(params["train_records_path"]):
+     #   n_training_samples+= 1
 
 
-    print("number of training examples {}".format(n_training_samples))
+   # print("number of training examples {}".format(n_training_samples))
 
-    steps_per_epoch = int(n_training_samples/params["batch_size"])+1
+   #steps_per_epoch = int(n_training_samples/params["batch_size"])+1
+     
+   # total_steps = steps_per_epoch*params["epochs"]
 
-    total_steps = steps_per_epoch*params["epochs"]
-
-    run_config = tf.estimator.RunConfig(model_dir = FLAGS.model_dir)
+    run_config = tf.estimator.RunConfig(model_dir = FLAGS.model_dir, save_checkpoints_steps = 5000)
 
     estimator = tf.estimator.Estimator(model_fn=custom_model_fn, config=run_config, params = params)
 
     train_input_fn = get_train(params)
     val_input_fn = get_validation(params)
 
-    estimator.train(input_fn=train_input_fn, steps=10)
+    estimator.train(input_fn=train_input_fn, steps=None)
     
 
  
@@ -238,6 +260,7 @@ if __name__ == "__main__":
     flags.mark_flag_as_required("val_records_path")
     flags.mark_flag_as_required("glove_path")
     flags.mark_flag_as_required("vocab_path")
+    flags.mark_flag_as_required("model_dir")
 
     tf.app.run()
 
