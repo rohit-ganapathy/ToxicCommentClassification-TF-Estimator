@@ -12,8 +12,8 @@ import numpy as np
 
 tf.logging.set_verbosity(tf.logging.INFO)
 
-flags = tf.flags
 
+flags = tf.flags
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("train_records_path", None,
@@ -34,13 +34,17 @@ flags.DEFINE_string("vocab_path", None, "path to vocab file")
 
 flags.DEFINE_string("model_dir", None, "path to store model related files")
 
+flags.DEFINE_integer("save_checkpoint_steps", 500, "save checkpoints every n steps")
+
+flags.DEFINE_float("learning_rate", 0.001, "learning rate for training")
+
+flags.DEFINE_integer("hidden_units", 128, "no of LSTM hidden units")\
+
+flags.DEFINE_integer("evaluate_steps", 500, "evaluate every n steps")
 
 
 def load_embedding_matrix(params):
 
-    
-    embedding_dimension = 300
-    
     glove_embeds = {}
     embedding_matrix = []
 
@@ -54,10 +58,10 @@ def load_embedding_matrix(params):
         try:
             embedding_matrix.append(np.array(glove_embeds[word]))
         except:
-            embedding_matrix.append(np.random.randn(embedding_dimension))
+            embedding_matrix.append(np.random.randn(params["embed_dims"]))
 
     
-    return np.array(embedding_matrix).shape
+    return np.array(embedding_matrix)
 
 
 
@@ -159,7 +163,6 @@ def custom_model_fn(features: Dict[str, tf.Tensor],
     """
 
     model_output = model(features, mode, params)
-    print("eueue")
     
     # Get prediction of model output
     
@@ -188,7 +191,7 @@ def custom_model_fn(features: Dict[str, tf.Tensor],
 
     # Configure the Training Op (for TRAIN mode)
     if mode == tf.contrib.learn.ModeKeys.TRAIN:
-        print("fhfhfhf")
+
         train_op = tf.contrib.layers.optimize_loss(
             loss=loss,
             global_step=tf.contrib.framework.get_global_step(),
@@ -214,7 +217,21 @@ def custom_model_fn(features: Dict[str, tf.Tensor],
 
 def main(_):
 
+    n_training_samples = 0
     
+    for record in tf.python_io.tf_record_iterator(FLAGS.train_records_path):
+        n_training_samples+= 1
+
+
+    print("number of training examples {}".format(n_training_samples))
+
+    steps_per_epoch = int(n_training_samples/FLAGS.batch_size)+1
+     
+    total_steps = steps_per_epoch*FLAGS.epochs
+
+    with open(FLAGS.vocab_path) as f:
+        vocab_count = sum(1 for _ in f)
+
     params = {
 
         "train_records_path" : FLAGS.train_records_path,
@@ -224,34 +241,29 @@ def main(_):
         "glove_path" : FLAGS.glove_path,
         "embed_dims" : FLAGS.embed_dims,
         "vocab_path" : FLAGS.vocab_path,
-        "vocab_size" : 30004,
-        "learning_rate" : 0.001
-
+        "vocab_size" : vocab_count,
+        "learning_rate" : FLAGS.learning_rate,
+        "hidden_size" : FLAGS.hidden_units
 
     }
 
     
-   # n_training_samples = 0
-    
-    #for record in tf.python_io.tf_record_iterator(params["train_records_path"]):
-     #   n_training_samples+= 1
-
-
-   # print("number of training examples {}".format(n_training_samples))
-
-   #steps_per_epoch = int(n_training_samples/params["batch_size"])+1
-     
-   # total_steps = steps_per_epoch*params["epochs"]
-
-    run_config = tf.estimator.RunConfig(model_dir = FLAGS.model_dir, save_checkpoints_steps = 5000)
+    run_config = tf.estimator.RunConfig(model_dir = FLAGS.model_dir, save_checkpoints_steps = FLAGS.save_checkpoints_steps)
 
     estimator = tf.estimator.Estimator(model_fn=custom_model_fn, config=run_config, params = params)
 
     train_input_fn = get_train(params)
-    val_input_fn = get_validation(params)
-
-    estimator.train(input_fn=train_input_fn, steps=None)
     
+    
+    for iteration in range(0,total_steps,FLAGS.evaluate_steps):
+        
+        estimator.train(input_fn=train_input_fn, steps=FLAGS.evaluate_steps)
+
+        val_input_fn = get_validation(params)
+        
+        eval_results = estimator.evaluate(input_fn = val_input_fn, steps = None)
+
+        print(eval_results)      
 
  
 if __name__ == "__main__":
