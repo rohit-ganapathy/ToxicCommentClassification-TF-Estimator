@@ -204,6 +204,7 @@ def main(_):
         "glove_path" : FLAGS.glove_path,
         "embed_dims" : FLAGS.embed_dims,
         "vocab_path" : FLAGS.vocab_path,
+        "seed" : 420    
 
     }
 
