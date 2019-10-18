@@ -10,7 +10,7 @@ from tensorflow.keras.layers import Add
 from typing import Dict, Any, Callable, Tuple
 import numpy as np
 
-
+tf.logging.set_verbosity(tf.logging.INFO)
 
 flags = tf.flags
 
@@ -242,14 +242,14 @@ def main(_):
      
    # total_steps = steps_per_epoch*params["epochs"]
 
-    run_config = tf.estimator.RunConfig(model_dir = FLAGS.model_dir, save_checkpoints_steps = 50)
+    run_config = tf.estimator.RunConfig(model_dir = FLAGS.model_dir, save_checkpoints_steps = 5000)
 
     estimator = tf.estimator.Estimator(model_fn=custom_model_fn, config=run_config, params = params)
 
     train_input_fn = get_train(params)
     val_input_fn = get_validation(params)
 
-    estimator.train(input_fn=train_input_fn, steps=200)
+    estimator.train(input_fn=train_input_fn, steps=None)
     
 
  
